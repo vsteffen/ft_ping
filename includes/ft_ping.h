@@ -10,11 +10,14 @@
 # include <arpa/inet.h>
 # include <netinet/ip_icmp.h>
 # include <signal.h>
+# include <sys/time.h>
 
 # define PROG_NAME	"ft_ping"
 # define USAGE		"Usage: %s destination\n"
 
-# define DEFAULT_SLEEP_TIME 1
+# define DEFAULT_SLEEP_TIME	1
+# define DEFAULT_TIMEOUT	4000
+# define DEFAULT_INTERVAL	1
 
 # define ICMP_ECHO_CODE	0
 # define ICMP_ECHO_ID	0
@@ -42,10 +45,37 @@ typedef struct	s_ip_dest {
 	char	ip[MAX_INET_ADDRSTRLEN];
 }		t_ip_dest;
 
+typedef struct	s_ping_stat {
+	size_t		icmp_seq_send;
+	size_t		icmp_seq_recv;
+	struct timeval	tv_ping_start;
+	struct timeval	tv_ping_end;
+	double		rtt_square_sum;
+	double		rtt_sum;
+	double		rtt_min;
+	double		rtt_max;
+}		t_ping_stat;
+
 typedef struct	s_ping {
 	int		sock_fd;
 	uint8_t		ttl;
+	bool		wait_alarm;
+	size_t		interval;
+	struct timeval	tv_timeout;
+	t_ping_stat	stat;
 	t_ip_dest	dest;
 }		t_ping;
+
+
+extern volatile struct s_ping	*g_ping;
+
+void	exit_clean(int exit_status);
+
+void	print_statistics();
+
+// Signals
+void	signal_handler_alrm(__attribute__((unused))int sig);
+void	signal_handler_int(__attribute__((unused))int sig);
+
 
 #endif
