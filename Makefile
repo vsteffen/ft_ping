@@ -41,7 +41,10 @@ HPATH 	=	-I $(ROOT)/includes -I $(LIBFT)/includes
 
 SRC =	ft_ping.c \
 	signal.c \
-	tools.c
+	print.c \
+	loop.c \
+	tools.c \
+	error.c
 
 PRE_CHECK_SUB_LIBFT	:= $(LIBFT)/Makefile
 PRE_CHECK_SUB		:= $(PRE_CHECK_SUB_LIBFT)

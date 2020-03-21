@@ -8,7 +8,8 @@ int	init_socket(void)
 		PERROR("socket");
 	if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, (const void *)&g_ping->ttl, sizeof(g_ping->ttl)) == -1)
 		PERROR("setsockopt");
-	setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout));
+	if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
+		PERROR("setsockopt");
 	return (sock_fd);
 }
 
@@ -32,8 +33,8 @@ void	fill_ping_pkt4(struct s_ping_pkt4 *ping_pkt, time_t timestamp) {
 	ping_pkt->icmp.icmp_type = ICMP_ECHO;
 	ping_pkt->icmp.icmp_code = PING_ICMP_ECHO_CODE;
 	ping_pkt->icmp.icmp_id = BSWAP16((uint16_t)getpid());
-	g_ping->stat.icmp_seq_send++;
-	ping_pkt->icmp.icmp_seq = BSWAP16(g_ping->stat.icmp_seq_send);
+	g_ping->stat.icmp_send++;
+	ping_pkt->icmp.icmp_seq = BSWAP16(g_ping->stat.icmp_send);
 	ping_pkt->timestamp = BSWAP64(timestamp);
 	ft_memcpy(&ping_pkt->icmp.icmp_dun, &timestamp, sizeof(timestamp));
 	ping_pkt->icmp.icmp_cksum = checksum(ping_pkt, sizeof(*ping_pkt));
@@ -67,6 +68,7 @@ void	ping_loop(int family)
 	union u_ping_pkt	ping_pkt;
 	struct timeval		tv_seq_start;
 	struct s_reply 		reply;
+	bool			ping_rcv_later = false;
 
 	if (family == AF_INET6) {
 		printf("TODO IPv6\n");
@@ -80,49 +82,64 @@ void	ping_loop(int family)
 		PERROR("gettimeofday");
 
 	while (true) {
-		if (gettimeofday(&tv_seq_start, NULL) == -1)
-			PERROR("gettimeofday");
-		if (family == AF_INET)
-			fill_ping_pkt4(&ping_pkt.pkt4, tv_seq_start.tv_sec);
-		else
-			exit_clean(EXIT_FAILURE); // TODO IPv6
-		g_ping->wait_alarm = true;
-		alarm(g_ping->interval);
-		if (family == AF_INET) {
-			if (sendto(g_ping->sock_fd, &ping_pkt.pkt4, sizeof(ping_pkt.pkt4), 0, (struct sockaddr*)&g_ping->dest.sa_in.ip4, sizeof(g_ping->dest.sa_in.ip4)) == -1)
-				PERROR("sendto");
-		}
-		else {
-			exit_clean(EXIT_FAILURE); // TODO IPv6
+		if (!ping_rcv_later) {
+			if (gettimeofday(&tv_seq_start, NULL) == -1)
+				PERROR("gettimeofday");
+			if (family == AF_INET)
+				fill_ping_pkt4(&ping_pkt.pkt4, tv_seq_start.tv_sec);
+			else
+				exit_clean(EXIT_FAILURE); // TODO IPv6
+			g_ping->wait_alarm = true;
+			alarm(g_ping->interval);
+			if (family == AF_INET) {
+				if (sendto(g_ping->sock_fd, &ping_pkt.pkt4, sizeof(ping_pkt.pkt4), 0, (struct sockaddr*)&g_ping->dest.sa_in.ip4, sizeof(g_ping->dest.sa_in.ip4)) == -1)
+					PERROR("sendto");
+			}
+			else {
+				exit_clean(EXIT_FAILURE); // TODO IPv6
+			}
 		}
 
 		fill_reply(&reply);
-
-		if ((reply.read_bytes = recvmsg(g_ping->sock_fd, &reply.msg, 0)) == -1) {
-			if (errno == EINTR)
-				dprintf(STDERR_FILENO, "%s: Request timed out\n", PROG_NAME);
-			// TODO If timed out
-			else
-				PERROR("recvmsg");
-		}
+		reply.read_bytes = recvmsg(g_ping->sock_fd, &reply.msg, 0);
 		if (reply.read_bytes == 0) {
 			dprintf(STDERR_FILENO, "%s: socket closed\n", PROG_NAME);
 			exit_clean(EXIT_FAILURE);
 		}
-		// printf("Receive data bytes = %zd\n", reply.read_bytes);
-		if ((size_t)reply.read_bytes < sizeof(struct ip)/* || TODO IPv6 check*/) {
-			dprintf(STDERR_FILENO, "%s: IP header from echo reply truncated\n", PROG_NAME);
-			exit_clean(EXIT_FAILURE);
-		}
-
-		if (family == AF_INET) {
-			read_ping_4(&reply);
-			print_ping_4(&reply, &tv_seq_start);
+		if (reply.read_bytes == -1) {
+			if (errno == EINTR || errno == EAGAIN) {
+				ping_rcv_later = false;
+				dprintf(STDERR_FILENO, "%s: Request timed out for icmp_seq=%hu\n", PROG_NAME, g_ping->stat.icmp_send);
+			}
+			// TODO If timed out
+			else
+				PERROR("recvmsg");
 		}
 		else {
-			exit_clean(EXIT_FAILURE); // TODO IPv6
-		}
+			// printf("Receive data bytes = %zd\n", reply.read_bytes);
+			if ((size_t)reply.read_bytes < sizeof(struct ip)/* || TODO IPv6 check*/) {
+				dprintf(STDERR_FILENO, "%s: IP header from echo reply truncated\n", PROG_NAME);
+				exit_clean(EXIT_FAILURE);
+			}
 
+			uint16_t rcv_icmp_seq;
+			if (family == AF_INET) {
+				read_ping_4(&reply);
+				rcv_icmp_seq = BSWAP16(reply.icmp_hdr.icmp4->icmp_seq);
+				if (rcv_icmp_seq == g_ping->stat.icmp_send || reply.icmp_hdr.icmp4->icmp_type != ICMP_ECHOREPLY) {
+					ping_rcv_later = false;
+					print_ping_4(&reply, &tv_seq_start);
+				}
+				else {
+					printf("%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
+					ping_rcv_later = true;
+					continue ;
+				}
+			}
+			else {
+				exit_clean(EXIT_FAILURE); // TODO IPv6
+			}
+		}
 		if (gettimeofday((struct timeval *)&g_ping->stat.tv_ping_end, NULL) == -1)
 			PERROR("gettimeofday");
 		while (g_ping->wait_alarm) ;
