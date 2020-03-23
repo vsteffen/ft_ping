@@ -3,6 +3,8 @@
 
 #include <math.h>
 
+# define COUNT_OF(ptr) (sizeof(ptr) / sizeof((ptr)[0]))
+
 # define STR_IMPL_(x) #x
 # define STR(x) STR_IMPL_(x)
 

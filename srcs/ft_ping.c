@@ -65,7 +65,7 @@ void	get_dest_ip(char *dest, struct s_ping *ping) {
 			memcpy(&(ping->dest.sa_in.ip6), (void *)tmp_ptr->ai_addr, sizeof(struct sockaddr_in6));
 			tmp_str = inet_ntop(AF_INET6, &(ping->dest.sa_in.ip6.sin6_addr), ping->dest.ip, INET6_ADDRSTRLEN);
 			ping->dest.family = AF_INET6;
-			// break ; // remove to handle IPv6
+			break ;
 		}
 		tmp_ptr = tmp_ptr->ai_next;
 	}

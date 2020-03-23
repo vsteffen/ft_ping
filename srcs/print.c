@@ -6,6 +6,10 @@ void	print_statistics() {
 	double	rtt_mean;
 	double	rtt_mdev;
 
+	if (g_ping->stat.icmp_rcv == 0) {
+		printf("\n");
+		return ;
+	}
 	printf("\n--- %s ping statistics ---\n", g_ping->dest.hostname);
 	rate = ABS((float)(g_ping->stat.icmp_rcv / (float)g_ping->stat.icmp_send) * 100.0 - 100.0);
 	if (g_ping->stat.icmp_send == 1)
@@ -47,19 +51,48 @@ void	print_ping_gen(struct timeval *tv_seq_start, ssize_t read_icmp_bytes, uint1
 	update_stats(tv_seq_diff);
 }
 
-void	print_ping_4(struct s_reply *reply, struct timeval *tv_seq_start) {
+bool	inspect_and_print_ping_4(struct s_reply *reply, struct timeval *tv_seq_start) {
 	uint16_t	rcv_icmp_seq;
 	const char	*rcv_code_str;
+	bool		info_packet;
 
+	if (reply->icmp_hdr.icmp4->icmp_type == ICMP_ECHO)
+		return (false);
 	rcv_icmp_seq = BSWAP16(reply->icmp_hdr.icmp4->icmp_seq);
 	if (reply->icmp_hdr.icmp4->icmp_type != ICMP_ECHOREPLY) {
-		g_ping->stat.icmp_error++;
 		rcv_code_str = get_error_code_str_4(reply->icmp_hdr.icmp4->icmp_type, reply->icmp_hdr.icmp4->icmp_code);
 		if (rcv_code_str)
 			printf("From %s (%s): icmp_seq=%hu : %s (%s)\n", g_ping->dest.reverse_dns, g_ping->dest.ip, rcv_icmp_seq, get_error_type_str_4(reply->icmp_hdr.icmp4->icmp_type), rcv_code_str);
 		else
 			printf("From %s (%s): icmp_seq=%hu : %s (code=%hhu)\n", g_ping->dest.reverse_dns, g_ping->dest.ip, rcv_icmp_seq, get_error_type_str_4(reply->icmp_hdr.icmp4->icmp_type), reply->icmp_hdr.icmp4->icmp_code);
+		info_packet = is_info_packet_4(reply->icmp_hdr.icmp4->icmp_type);
+		if (!info_packet)
+			g_ping->stat.icmp_error++;
+		return (!info_packet);
 	}
-	else
-		print_ping_gen(tv_seq_start, reply->read_bytes - sizeof(struct ip), rcv_icmp_seq);
+	print_ping_gen(tv_seq_start, reply->read_bytes - sizeof(struct ip), rcv_icmp_seq);
+	return (true);
+}
+
+bool	inspect_and_print_ping_6(struct s_reply *reply, struct timeval *tv_seq_start) {
+	uint16_t	rcv_icmp_seq;
+	const char	*rcv_code_str;
+	bool		info_packet;
+
+	if (reply->icmp_hdr.icmp6->icmp6_type == ICMP6_ECHO_REQUEST)
+		return (false);
+	rcv_icmp_seq = BSWAP16(reply->icmp_hdr.icmp6->icmp6_seq);
+	if (reply->icmp_hdr.icmp6->icmp6_type != ICMP6_ECHO_REPLY) {
+		rcv_code_str = get_error_code_str_6(reply->icmp_hdr.icmp6->icmp6_type, reply->icmp_hdr.icmp6->icmp6_code);
+		if (rcv_code_str)
+			printf("From %s (%s): icmp_seq=%hu : %s (%s)\n", g_ping->dest.reverse_dns, g_ping->dest.ip, rcv_icmp_seq, get_error_type_str_6(reply->icmp_hdr.icmp6->icmp6_type), rcv_code_str);
+		else
+			printf("From %s (%s): icmp_seq=%hu : %s (code=%hhu)\n", g_ping->dest.reverse_dns, g_ping->dest.ip, rcv_icmp_seq, get_error_type_str_6(reply->icmp_hdr.icmp6->icmp6_type), reply->icmp_hdr.icmp6->icmp6_code);
+		info_packet = is_info_packet_6(reply->icmp_hdr.icmp6->icmp6_type);
+		if (!info_packet)
+			g_ping->stat.icmp_error++;
+		return (!info_packet);
+	}
+	print_ping_gen(tv_seq_start, reply->read_bytes, rcv_icmp_seq);
+	return (true);
 }

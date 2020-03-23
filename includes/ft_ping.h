@@ -87,7 +87,7 @@ typedef struct	s_ping_stat {
 
 typedef struct	s_ping {
 	int		sock_fd;
-	uint8_t		ttl;
+	int		ttl;
 	bool		wait_alarm;
 	size_t		interval;
 	struct timeval	tv_timeout;
@@ -106,12 +106,20 @@ void	ping_loop(int family);
 void	signal_handler_alrm(__attribute__((unused))int sig);
 void	signal_handler_int(__attribute__((unused))int sig);
 
-// Error strings
+// Error
 const char	*get_error_type_str_4(uint8_t type);
 const char	*get_error_code_str_4(uint8_t type, uint8_t code);
+const char	*get_error_type_str_6(uint8_t type);
+const char	*get_error_code_str_6(uint8_t type, uint8_t code);
+
+// Info
+bool	is_info_packet_4(uint8_t type);
+bool	is_info_packet_6(uint8_t type);
+
 
 // Print
-void	print_ping_4(struct s_reply *reply, struct timeval *tv_seq_start);
+bool	inspect_and_print_ping_4(struct s_reply *reply, struct timeval *tv_seq_start);
+bool	inspect_and_print_ping_6(struct s_reply *reply, struct timeval *tv_seq_start);
 void	print_statistics();
 
 #endif

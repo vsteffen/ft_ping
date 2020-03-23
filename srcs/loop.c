@@ -1,15 +1,25 @@
 #include "ft_ping.h"
 
-int	init_socket(void)
+int	init_socket(int family)
 {
 	int	sock_fd;
 
-	if ((sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1)
-		PERROR("socket");
-	if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, (const void *)&g_ping->ttl, sizeof(g_ping->ttl)) == -1)
-		PERROR("setsockopt");
-	if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
-		PERROR("setsockopt");
+	if (family == AF_INET) {
+		if ((sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1)
+			PERROR("socket");
+		if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, (const void *)&g_ping->ttl, sizeof(g_ping->ttl)) == -1)
+			PERROR("setsockopt");
+		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
+			PERROR("setsockopt");
+	}
+	else {
+		if ((sock_fd = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6)) == -1)
+			PERROR("socket");
+		if (setsockopt(sock_fd, IPPROTO_IPV6, IP_TTL, (const void *)&g_ping->ttl, sizeof(g_ping->ttl)) == -1)
+			PERROR("setsockopt");
+		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
+			PERROR("setsockopt");
+	}
 	return (sock_fd);
 }
 
@@ -27,7 +37,7 @@ uint16_t	checksum(void *addr, int size) {
 	return (~sum);
 }
 
-void	fill_ping_pkt4(struct s_ping_pkt4 *ping_pkt, time_t timestamp) {
+void	fill_ping_pkt_4(struct s_ping_pkt4 *ping_pkt, time_t timestamp) {
 	ft_bzero(ping_pkt, sizeof(struct s_ping_pkt4));
 
 	ping_pkt->icmp.icmp_type = ICMP_ECHO;
@@ -40,6 +50,18 @@ void	fill_ping_pkt4(struct s_ping_pkt4 *ping_pkt, time_t timestamp) {
 	ping_pkt->icmp.icmp_cksum = checksum(ping_pkt, sizeof(*ping_pkt));
 }
 
+void	fill_ping_pkt_6(struct s_ping_pkt6 *ping_pkt, time_t timestamp) {
+	ft_bzero(ping_pkt, sizeof(struct s_ping_pkt6));
+
+	ping_pkt->icmp.icmp6_type = ICMP6_ECHO_REQUEST;
+	ping_pkt->icmp.icmp6_code = PING_ICMP_ECHO_CODE;
+	ping_pkt->icmp.icmp6_id = BSWAP16((uint16_t)getpid());
+	g_ping->stat.icmp_send++;
+	ping_pkt->icmp.icmp6_seq = BSWAP16(g_ping->stat.icmp_send);
+	ping_pkt->timestamp = BSWAP64(timestamp);
+	ping_pkt->icmp.icmp6_cksum = checksum(ping_pkt, sizeof(*ping_pkt));
+}
+
 void	fill_reply(struct s_reply *reply) {
 	reply->msg.msg_name = NULL;
 	reply->msg.msg_iov = &reply->iov;
@@ -48,12 +70,17 @@ void	fill_reply(struct s_reply *reply) {
 	reply->msg.msg_iovlen = 1;
 	reply->msg.msg_control = NULL;
 	reply->msg.msg_controllen = 0;
+
 }
 
 void	read_ping_4(struct s_reply *reply) {
 	struct ip	*ip_hdr;
 	ssize_t		ip_icmp_offset;
 
+	if ((size_t)reply->read_bytes < sizeof(struct ip)) {
+		dprintf(STDERR_FILENO, "%s: IP header from echo reply truncated\n", PROG_NAME);
+		exit_clean(EXIT_FAILURE);
+	}
 	ip_hdr = (struct ip *)reply->recv_buff;
 	ip_icmp_offset = ip_hdr->ip_hl << 2;
 	if (ip_hdr->ip_p != IPPROTO_ICMP || (size_t)reply->read_bytes < ip_icmp_offset + sizeof(struct icmp)) {
@@ -63,32 +90,38 @@ void	read_ping_4(struct s_reply *reply) {
 	reply->icmp_hdr.icmp4 = (struct icmp *)(reply->recv_buff + ip_icmp_offset);
 }
 
+void	read_ping_6(struct s_reply *reply) {
+	if ((size_t)reply->read_bytes < sizeof(struct icmp6_hdr)) {
+		dprintf(STDERR_FILENO, "%s: ICMPv6 header from echo reply truncated\n", PROG_NAME);
+		exit_clean(EXIT_FAILURE);
+	}
+	reply->icmp_hdr.icmp6 = (struct icmp6_hdr *)(reply->recv_buff);
+}
+
 void	ping_loop(int family)
 {
 	union u_ping_pkt	ping_pkt;
 	struct timeval		tv_seq_start;
 	struct s_reply 		reply;
-	bool			ping_rcv_later = false;
+	bool			send_ping = true;
 
-	if (family == AF_INET6) {
-		printf("TODO IPv6\n");
-		exit_clean(EXIT_FAILURE);
-	}
+	if (family == AF_INET)
+		printf("PING %s (%s) %zu(%d) bytes of data.\n", g_ping->dest.hostname, g_ping->dest.ip, PING_PKT_DATA_SIZE + sizeof(struct ip), PING_PKT_SIZE);
+	else
+		printf("PING %s(%s (%s)) %zu data bytes\n", g_ping->dest.hostname, g_ping->dest.reverse_dns, g_ping->dest.ip, sizeof(struct icmp6_hdr) + PING_PKT_DATA_SIZE);
 
-	printf("PING %s (%s) %zu(%d) bytes of data.\n", g_ping->dest.hostname, g_ping->dest.ip, PING_PKT_DATA_SIZE + sizeof(struct ip), PING_PKT_SIZE);
-
-	g_ping->sock_fd = init_socket();
+	g_ping->sock_fd = init_socket(family);
 	if (gettimeofday((struct timeval *)&g_ping->stat.tv_ping_start, NULL) == -1)
 		PERROR("gettimeofday");
 
 	while (true) {
-		if (!ping_rcv_later) {
+		if (send_ping) {
 			if (gettimeofday(&tv_seq_start, NULL) == -1)
 				PERROR("gettimeofday");
 			if (family == AF_INET)
-				fill_ping_pkt4(&ping_pkt.pkt4, tv_seq_start.tv_sec);
+				fill_ping_pkt_4(&ping_pkt.pkt4, tv_seq_start.tv_sec);
 			else
-				exit_clean(EXIT_FAILURE); // TODO IPv6
+				fill_ping_pkt_6(&ping_pkt.pkt6, tv_seq_start.tv_sec);
 			g_ping->wait_alarm = true;
 			alarm(g_ping->interval);
 			if (family == AF_INET) {
@@ -96,7 +129,8 @@ void	ping_loop(int family)
 					PERROR("sendto");
 			}
 			else {
-				exit_clean(EXIT_FAILURE); // TODO IPv6
+				if (sendto(g_ping->sock_fd, &ping_pkt.pkt6, sizeof(ping_pkt.pkt6), 0, (struct sockaddr*)&g_ping->dest.sa_in.ip6, sizeof(g_ping->dest.sa_in.ip6)) == -1)
+					PERROR("sendto");
 			}
 		}
 
@@ -108,36 +142,41 @@ void	ping_loop(int family)
 		}
 		if (reply.read_bytes == -1) {
 			if (errno == EINTR || errno == EAGAIN) {
-				ping_rcv_later = false;
+				send_ping = true;
 				dprintf(STDERR_FILENO, "%s: Request timed out for icmp_seq=%hu\n", PROG_NAME, g_ping->stat.icmp_send);
 			}
-			// TODO If timed out
 			else
 				PERROR("recvmsg");
 		}
 		else {
-			// printf("Receive data bytes = %zd\n", reply.read_bytes);
-			if ((size_t)reply.read_bytes < sizeof(struct ip)/* || TODO IPv6 check*/) {
-				dprintf(STDERR_FILENO, "%s: IP header from echo reply truncated\n", PROG_NAME);
-				exit_clean(EXIT_FAILURE);
-			}
-
 			uint16_t rcv_icmp_seq;
 			if (family == AF_INET) {
 				read_ping_4(&reply);
 				rcv_icmp_seq = BSWAP16(reply.icmp_hdr.icmp4->icmp_seq);
 				if (rcv_icmp_seq == g_ping->stat.icmp_send || reply.icmp_hdr.icmp4->icmp_type != ICMP_ECHOREPLY) {
-					ping_rcv_later = false;
-					print_ping_4(&reply, &tv_seq_start);
+					send_ping = inspect_and_print_ping_4(&reply, &tv_seq_start);
+					if (!send_ping)
+						continue;
 				}
 				else {
 					printf("%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
-					ping_rcv_later = true;
+					send_ping = false;
 					continue ;
 				}
 			}
 			else {
-				exit_clean(EXIT_FAILURE); // TODO IPv6
+				read_ping_6(&reply);
+				rcv_icmp_seq = BSWAP16(reply.icmp_hdr.icmp6->icmp6_seq);
+				if (rcv_icmp_seq == g_ping->stat.icmp_send || reply.icmp_hdr.icmp6->icmp6_type != ICMP6_ECHO_REPLY) {
+					send_ping = inspect_and_print_ping_6(&reply, &tv_seq_start);
+					if (!send_ping)
+						continue;
+				}
+				else {
+					printf("%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
+					send_ping = false;
+					continue ;
+				}
 			}
 		}
 		if (gettimeofday((struct timeval *)&g_ping->stat.tv_ping_end, NULL) == -1)

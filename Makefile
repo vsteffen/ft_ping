@@ -44,7 +44,8 @@ SRC =	ft_ping.c \
 	print.c \
 	loop.c \
 	tools.c \
-	error.c
+	error.c \
+	info.c
 
 PRE_CHECK_SUB_LIBFT	:= $(LIBFT)/Makefile
 PRE_CHECK_SUB		:= $(PRE_CHECK_SUB_LIBFT)
