@@ -31,7 +31,8 @@ char	*reverse_dns_lookup(char *ip_str, int family) {
 	}
 
 	if ((status = getnameinfo((family == AF_INET ? (struct sockaddr *)&sa_in.ip4 : (struct sockaddr *)&sa_in.ip6), (family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)), buff_hostname, sizeof(buff_hostname), NULL, 0, NI_NAMEREQD)) != 0) {
-		dprintf(STDERR_FILENO, "%s: getnameinfo: %s\n", PROG_NAME, gai_strerror(status)); // not authorized by the subject but it would be stupid to not do it
+		if (g_ping->options.set[e_option_verbose])
+			dprintf(STDERR_FILENO, "%s: getnameinfo: %s\n", PROG_NAME, gai_strerror(status)); // not authorized by the subject but it would be stupid to not do it
 		return (NULL);
 	}
 	return (ft_strdup(buff_hostname));
@@ -59,13 +60,15 @@ void	get_dest_ip(char *dest, struct s_ping *ping) {
 			memcpy(&(ping->dest.sa_in.ip4), (void *)tmp_ptr->ai_addr, sizeof(struct sockaddr_in));
 			tmp_str = inet_ntop(AF_INET, &(ping->dest.sa_in.ip4.sin_addr), ping->dest.ip, INET_ADDRSTRLEN);
 			ping->dest.family = AF_INET;
-			break ;
+			if (!ping->options.set[e_option_version] || (ping->options.set[e_option_version] && ping->options.version == e_ip4))
+				break ;
 		}
 		else if (tmp_ptr->ai_family == AF_INET6) {
 			memcpy(&(ping->dest.sa_in.ip6), (void *)tmp_ptr->ai_addr, sizeof(struct sockaddr_in6));
 			tmp_str = inet_ntop(AF_INET6, &(ping->dest.sa_in.ip6.sin6_addr), ping->dest.ip, INET6_ADDRSTRLEN);
 			ping->dest.family = AF_INET6;
-			break ;
+			if (!ping->options.set[e_option_version] || (ping->options.set[e_option_version] && ping->options.version == e_ip6))
+				break ;
 		}
 		tmp_ptr = tmp_ptr->ai_next;
 	}
@@ -78,17 +81,17 @@ void	get_dest_ip(char *dest, struct s_ping *ping) {
 	}
 }
 
-void	init_struct_ping(struct s_ping *ping, char **av) {
+void	init_struct_ping(struct s_ping *ping) {
 	g_ping = ping;
-	ping->dest.hostname = av[1];
-	ping->ttl = DEFAULT_TTL;
+	if (!ping->options.set[e_option_ttl])
+		ping->options.ttl = DEFAULT_TTL;
 	ping->dest.reverse_dns = NULL;
 	ping->sock_fd = -1;
-	ping->tv_timeout.tv_sec = DEFAULT_TIMEOUT / 1000;
-	ping->tv_timeout.tv_usec = DEFAULT_TIMEOUT * 1000 % 1000000;
-	ping->interval = DEFAULT_INTERVAL;
+	if (!ping->options.set[e_option_interval])
+		ping->options.interval = DEFAULT_INTERVAL;
+	g_ping->wait_alarm = false;
 	ft_bzero(&ping->stat, sizeof(ping->stat));
-	get_dest_ip(av[1], ping);
+	get_dest_ip(ping->dest.hostname, ping);
 	ping->dest.reverse_dns = reverse_dns_lookup(ping->dest.ip, ping->dest.family);
 	if (!ping->dest.reverse_dns)
 		ping->dest.reverse_dns = ft_strdup(ping->dest.ip);
@@ -98,11 +101,11 @@ int	main(int ac, char **av)
 {
 	struct s_ping	ping;
 
-	if (ac < 2) {
+	if (!parse_options(ac, av, &ping)) {
 		dprintf(STDERR_FILENO, USAGE, PROG_NAME);
-		return 1;
+		return (EXIT_FAILURE);
 	}
-	init_struct_ping(&ping, av);
+	init_struct_ping(&ping);
 	signal(SIGINT, &signal_handler_int);
 	signal(SIGALRM, &signal_handler_alrm);
 	ping_loop(ping.dest.family);

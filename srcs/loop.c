@@ -7,9 +7,7 @@ int	init_socket(int family)
 	if (family == AF_INET) {
 		if ((sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1)
 			PERROR("socket");
-		if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, (const void *)&g_ping->ttl, sizeof(g_ping->ttl)) == -1)
-			PERROR("setsockopt");
-		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
+		if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, (const void *)&g_ping->options.ttl, sizeof(g_ping->options.ttl)) == -1)
 			PERROR("setsockopt");
 	}
 	else {
@@ -18,7 +16,9 @@ int	init_socket(int family)
 		int flag_on = 1;
 		if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &flag_on, sizeof(flag_on)) == -1)
 			PERROR("setsockopt");
-		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
+	}
+	if (g_ping->options.set[e_option_timeout]) {
+		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->options.timeout, sizeof(g_ping->options.timeout)) == -1)
 			PERROR("setsockopt");
 	}
 	return (sock_fd);
@@ -79,7 +79,7 @@ void	fill_send_msg(struct s_reply *reply, struct s_ping_pkt6 *pkt6) {
 	cmsg->cmsg_level = IPPROTO_IPV6;
 	cmsg->cmsg_type = IPV6_HOPLIMIT;
 	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-	memcpy(CMSG_DATA(cmsg), (void *)&g_ping->ttl, sizeof(int));
+	memcpy(CMSG_DATA(cmsg), (void *)&g_ping->options.ttl, sizeof(int));
 }
 
 void	fill_recv_msg(struct s_reply *reply) {
@@ -141,8 +141,10 @@ void	ping_loop(int family)
 				fill_ping_pkt_4(&ping_pkt.pkt4, tv_seq_start.tv_sec);
 			else
 				fill_ping_pkt_6(&ping_pkt.pkt6, tv_seq_start.tv_sec);
-			g_ping->wait_alarm = true;
-			alarm(g_ping->interval);
+			if (g_ping->options.interval > 0) {
+				g_ping->wait_alarm = true;
+				alarm(g_ping->options.interval);
+			}
 			if (family == AF_INET) {
 				if (sendto(g_ping->sock_fd, &ping_pkt.pkt4, sizeof(ping_pkt.pkt4), 0, (struct sockaddr*)&g_ping->dest.sa_in.ip4, sizeof(g_ping->dest.sa_in.ip4)) == -1)
 					PERROR("sendto");
@@ -163,7 +165,8 @@ void	ping_loop(int family)
 		if (reply.read_bytes == -1) {
 			if (errno == EINTR || errno == EAGAIN) {
 				send_ping = true;
-				dprintf(STDERR_FILENO, "%s: Request timed out for icmp_seq=%hu\n", PROG_NAME, g_ping->stat.icmp_send);
+				if (g_ping->options.set[e_option_verbose])
+					dprintf(STDERR_FILENO, "%s: Request timed out for icmp_seq=%hu\n", PROG_NAME, g_ping->stat.icmp_send);
 			}
 			else
 				PERROR("recvmsg");
@@ -179,7 +182,8 @@ void	ping_loop(int family)
 						continue;
 				}
 				else {
-					printf("%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
+					if (g_ping->options.set[e_option_verbose])
+						dprintf(STDERR_FILENO, "%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
 					send_ping = false;
 					continue ;
 				}
@@ -193,7 +197,8 @@ void	ping_loop(int family)
 						continue;
 				}
 				else {
-					printf("%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
+					if (g_ping->options.set[e_option_verbose])
+						dprintf(STDERR_FILENO, "%s: received icmp_seq=%hu later\n", PROG_NAME, rcv_icmp_seq);
 					send_ping = false;
 					continue ;
 				}
@@ -201,6 +206,8 @@ void	ping_loop(int family)
 		}
 		if (gettimeofday((struct timeval *)&g_ping->stat.tv_ping_end, NULL) == -1)
 			PERROR("gettimeofday");
-		while (g_ping->wait_alarm) ;
+		if (g_ping->options.set[e_option_count] && g_ping->options.count == g_ping->stat.icmp_send)
+			signal_handler_int(0);
+		while (g_ping->options.interval > 0 && g_ping->wait_alarm) ;
 	}
 }

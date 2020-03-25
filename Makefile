@@ -40,6 +40,7 @@ LPATH	=	$(LIBFT)/libft.a
 HPATH 	=	-I $(ROOT)/includes -I $(LIBFT)/includes
 
 SRC =	ft_ping.c \
+	options.c \
 	signal.c \
 	print.c \
 	loop.c \
