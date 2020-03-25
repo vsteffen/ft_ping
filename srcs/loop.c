@@ -15,7 +15,8 @@ int	init_socket(int family)
 	else {
 		if ((sock_fd = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6)) == -1)
 			PERROR("socket");
-		if (setsockopt(sock_fd, IPPROTO_IPV6, IP_TTL, (const void *)&g_ping->ttl, sizeof(g_ping->ttl)) == -1)
+		int flag_on = 1;
+		if (setsockopt(sock_fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &flag_on, sizeof(flag_on)) == -1)
 			PERROR("setsockopt");
 		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&g_ping->tv_timeout, sizeof(g_ping->tv_timeout)) == -1)
 			PERROR("setsockopt");
@@ -62,15 +63,33 @@ void	fill_ping_pkt_6(struct s_ping_pkt6 *ping_pkt, time_t timestamp) {
 	ping_pkt->icmp.icmp6_cksum = checksum(ping_pkt, sizeof(*ping_pkt));
 }
 
-void	fill_reply(struct s_reply *reply) {
+void	fill_send_msg(struct s_reply *reply, struct s_ping_pkt6 *pkt6) {
+	reply->msg.msg_name = (void *)&g_ping->dest.sa_in.ip6;
+	reply->msg.msg_namelen = sizeof(g_ping->dest.sa_in.ip6);
+	reply->msg.msg_iov = &reply->iov;
+	reply->iov.iov_base = pkt6;
+	reply->iov.iov_len = sizeof(pkt6);
+	reply->msg.msg_iovlen = 1;
+
+	reply->msg.msg_control = &reply->ctrl.buff;
+	reply->msg.msg_controllen = sizeof(reply->ctrl.buff);
+
+	struct cmsghdr *cmsg;
+	cmsg = CMSG_FIRSTHDR(&reply->msg);
+	cmsg->cmsg_level = IPPROTO_IPV6;
+	cmsg->cmsg_type = IPV6_HOPLIMIT;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	memcpy(CMSG_DATA(cmsg), (void *)&g_ping->ttl, sizeof(int));
+}
+
+void	fill_recv_msg(struct s_reply *reply) {
 	reply->msg.msg_name = NULL;
 	reply->msg.msg_iov = &reply->iov;
 	reply->iov.iov_base = reply->recv_buff;
 	reply->iov.iov_len = sizeof(reply->recv_buff);
 	reply->msg.msg_iovlen = 1;
-	reply->msg.msg_control = NULL;
-	reply->msg.msg_controllen = 0;
-
+	reply->msg.msg_control = &reply->ctrl;
+	reply->msg.msg_controllen = sizeof(reply->ctrl);
 }
 
 void	read_ping_4(struct s_reply *reply) {
@@ -129,12 +148,13 @@ void	ping_loop(int family)
 					PERROR("sendto");
 			}
 			else {
-				if (sendto(g_ping->sock_fd, &ping_pkt.pkt6, sizeof(ping_pkt.pkt6), 0, (struct sockaddr*)&g_ping->dest.sa_in.ip6, sizeof(g_ping->dest.sa_in.ip6)) == -1)
-					PERROR("sendto");
+				fill_send_msg(&reply, &ping_pkt.pkt6);
+				if (sendmsg(g_ping->sock_fd, &reply.msg, 0) == -1)
+					PERROR("sendmsg");
 			}
 		}
 
-		fill_reply(&reply);
+		fill_recv_msg(&reply);
 		reply.read_bytes = recvmsg(g_ping->sock_fd, &reply.msg, 0);
 		if (reply.read_bytes == 0) {
 			dprintf(STDERR_FILENO, "%s: socket closed\n", PROG_NAME);

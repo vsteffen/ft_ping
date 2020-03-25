@@ -10,6 +10,7 @@
 # include <arpa/inet.h>
 # include <netinet/ip_icmp.h>
 # include <netinet/icmp6.h>
+# include <netinet/ip6.h>
 # include <signal.h>
 # include <sys/time.h>
 
@@ -63,6 +64,10 @@ typedef struct	s_reply {
 	struct iovec		iov;
 	ssize_t			read_bytes;
 	union u_icmp_hdr	icmp_hdr;
+	union	{
+		char		buff[CMSG_SPACE(sizeof(int))];
+		struct cmsghdr	align;
+	} ctrl;
 }		t_reply;
 
 typedef struct	s_ip_dest {
