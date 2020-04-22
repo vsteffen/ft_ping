@@ -86,6 +86,9 @@ static bool	handle_option(char *option, char *value, int *i, struct s_ping *ping
 		else if (option[j] == OPTION_VERBOSE_CHAR) {
 			ping->options.set[e_option_verbose] = true;
 		}
+		else if (option[j] == OPTION_USAGE) {
+			return (false);
+		}
 		else {
 			dprintf(STDERR_FILENO, "%s: invalid option -- '%c'\n", PROG_NAME, option[j]);
 			return (false);

@@ -60,13 +60,13 @@ bool	inspect_and_print_ping_4(struct s_reply *reply, struct timeval *tv_seq_star
 		return (false);
 	rcv_icmp_seq = BSWAP16(reply->icmp_hdr.icmp4->icmp_seq);
 	if (reply->icmp_hdr.icmp4->icmp_type != ICMP_ECHOREPLY) {
+		if ((size_t)reply->read_bytes >= ((void *)reply->icmp_hdr.icmp4 - (void *)&reply->recv_buff) + sizeof(struct ip) + sizeof(struct icmp)) {
+			icmp_send_request = (struct icmp *)(reply->icmp_hdr.icmp4->icmp_data + sizeof(struct ip));
+			rcv_icmp_seq = BSWAP16(icmp_send_request->icmp_seq);
+		}
+		else if (g_ping->options.set[e_option_verbose])
+			dprintf(STDERR_FILENO, "Missing previous ICMP header in reply\n");
 		if (g_ping->options.set[e_option_verbose]) {
-			if ((size_t)reply->read_bytes >= ((void *)reply->icmp_hdr.icmp4 - (void *)&reply->recv_buff) + sizeof(struct ip) + sizeof(struct icmp)) {
-				icmp_send_request = (struct icmp *)(reply->icmp_hdr.icmp4->icmp_data + sizeof(struct ip));
-				rcv_icmp_seq = BSWAP16(icmp_send_request->icmp_seq);
-			}
-			else
-				dprintf(STDERR_FILENO, "Missing previous ICMP header in reply\n");
 			rcv_code_str = get_error_code_str_4(reply->icmp_hdr.icmp4->icmp_type, reply->icmp_hdr.icmp4->icmp_code);
 			if (rcv_code_str)
 				dprintf(STDERR_FILENO, "From %s (%s): icmp_seq=%hu : %s (%s)\n", g_ping->dest.reverse_dns, g_ping->dest.ip, rcv_icmp_seq, get_error_type_str_4(reply->icmp_hdr.icmp4->icmp_type), rcv_code_str);
@@ -92,13 +92,13 @@ bool	inspect_and_print_ping_6(struct s_reply *reply, struct timeval *tv_seq_star
 		return (false);
 	rcv_icmp_seq = BSWAP16(reply->icmp_hdr.icmp6->icmp6_seq);
 	if (reply->icmp_hdr.icmp6->icmp6_type != ICMP6_ECHO_REPLY) {
+		if ((size_t)reply->read_bytes >= sizeof(struct icmp6_hdr) * 2 + sizeof(struct ip6_hdr)) {
+			icmp_send_request = (struct icmp6_hdr *)((void *)reply->icmp_hdr.icmp6 + sizeof(struct icmp6_hdr) + sizeof(struct ip6_hdr));
+			rcv_icmp_seq = BSWAP16(icmp_send_request->icmp6_seq);
+		}
+		else if (g_ping->options.set[e_option_verbose])
+			dprintf(STDERR_FILENO, "Missing previous ICMP header in reply\n");
 		if (g_ping->options.set[e_option_verbose]) {
-			if ((size_t)reply->read_bytes >= sizeof(struct icmp6_hdr) * 2 + sizeof(struct ip6_hdr)) {
-				icmp_send_request = (struct icmp6_hdr *)((void *)reply->icmp_hdr.icmp6 + sizeof(struct icmp6_hdr) + sizeof(struct ip6_hdr));
-				rcv_icmp_seq = BSWAP16(icmp_send_request->icmp6_seq);
-			}
-			else
-				dprintf(STDERR_FILENO, "Missing previous ICMP header in reply\n");
 			rcv_code_str = get_error_code_str_6(reply->icmp_hdr.icmp6->icmp6_type, reply->icmp_hdr.icmp6->icmp6_code);
 			if (rcv_code_str)
 				dprintf(STDERR_FILENO, "From %s (%s): icmp_seq=%hu : %s (%s)\n", g_ping->dest.reverse_dns, g_ping->dest.ip, rcv_icmp_seq, get_error_type_str_6(reply->icmp_hdr.icmp6->icmp6_type), rcv_code_str);

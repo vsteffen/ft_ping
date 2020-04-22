@@ -49,6 +49,7 @@ typedef enum {
 # define OPTION_TTL_CHAR	't'
 # define OPTION_TIMEOUT_CHAR	'W'
 # define OPTION_VERBOSE_CHAR	'v'
+# define OPTION_USAGE		'h'
 
 typedef struct __attribute__((packed))	s_ping_pkt4 {
 	struct icmp	icmp;
